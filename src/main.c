@@ -72,6 +72,27 @@ int count_color(uint8_t c) {
   }
 }
 
+void dummy_field(struct ncplane *ncp, int lines, int cols, int start_y,
+                 int start_x) {
+  // draw initial "dummy" grid
+  for (int y = 0; y < lines; y++) {
+    for (int x = 0; x < cols; x++) {
+      if ((x + y) % 2) {
+        ncplane_set_bg_rgb(ncp, LIGHT_TILE);
+      } else {
+        ncplane_set_bg_rgb(ncp, DARK_TILE);
+      }
+      ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
+    }
+  }
+
+  // print some instructions
+  ncplane_set_fg_rgb(ncp, GREY);
+  ncplane_set_bg_default(ncp);
+  ncplane_putstr_yx(ncp, start_y - 1, (cols / 0.2) / 2 - 18,
+                    "To start, click a tile on the field!");
+}
+
 int main() {
   // seed the rng
   srand(time(NULL));
@@ -89,30 +110,36 @@ int main() {
   ncplane_erase(ncp);
 
   // drawing constraints
-  // lines and cols should be set by user
+  // lines and cols should be set by user but have a default
   int lines = LINES / 2;
   int cols = COLS * 0.2;
   int start_y = (LINES - lines) / 2;
   int start_x = (COLS - cols * X_MULT) / 2;
 
-  for (int y = 0; y < lines; y++) {
-    for (int x = 0; x < cols; x++) {
-      if ((x + y) % 2) {
-        ncplane_set_bg_rgb(ncp, LIGHT_TILE);
-      } else {
-        ncplane_set_bg_rgb(ncp, DARK_TILE);
-      }
-      ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
-    }
-  }
-  ncplane_set_fg_rgb(ncp, GREY);
-  ncplane_set_bg_default(ncp);
-  ncplane_putstr_yx(ncp, start_y - 1, COLS / 2 - 18,
-                    "To start, click a tile on the field!");
+  // // draw initial "dummy" grid
+  // for (int y = 0; y < lines; y++) {
+  //   for (int x = 0; x < cols; x++) {
+  //     if ((x + y) % 2) {
+  //       ncplane_set_bg_rgb(ncp, LIGHT_TILE);
+  //     } else {
+  //       ncplane_set_bg_rgb(ncp, DARK_TILE);
+  //     }
+  //     ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
+  //   }
+  // }
+
+  // // print some instructions
+  // ncplane_set_fg_rgb(ncp, GREY);
+  // ncplane_set_bg_default(ncp);
+  // ncplane_putstr_yx(ncp, start_y - 1, COLS / 2 - 18,
+  //                   "To start, click a tile on the field!");
+  dummy_field(ncp, lines, cols, start_y, start_x);
   notcurses_render(nc);
 
   // current tile, for easier access when looping through field
   struct tile *curr;
+
+  // wait for user to click inside grid
   while (1) {
     notcurses_get_blocking(nc, &nci);
     if (nci.y < start_y || nci.y > start_y + lines || nci.x < start_x ||
@@ -123,26 +150,31 @@ int main() {
       break;
     }
   }
+
+  // make a minefield
   struct tile(*field)[lines][cols] =
       NEW_MINEFIELD(lines, cols, nci.y - start_y, (nci.x - start_x) / X_MULT);
 
+  // process initial click
   curr = &(*field)[nci.y - start_y][(nci.x - start_x) / X_MULT];
   curr->flags |= IS_UNCOVERED;
   if (curr->count == 0) {
     uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
                               (nci.x - start_x) / X_MULT);
   }
+
   // 20% of the tiles of any given grid are mines
   int mines = lines * cols * 0.2;
   int flags = 0;
 
+  // print remaining # of mines
   ncplane_erase_region(ncp, start_y - 1, 0, -1, COLS);
   ncplane_set_bg_default(ncp);
   ncplane_set_fg_rgb(ncp, GREY);
   ncplane_printf_yx(ncp, start_y - 1, start_x, "Remaining mines: %d",
                     mines - flags);
-  // draw field now
 
+  // draw "actual" (instead of dummy) field now
   for (int y = 0; y < lines; y++) {
     for (int x = 0; x < cols; x++) {
       curr = &(*field)[y][x];
@@ -156,6 +188,7 @@ int main() {
           ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
         }
       } else {
+        // if not uncovered
         if ((x + y) % 2) {
           ncplane_set_bg_rgb(ncp, LIGHT_TILE);
         } else {
@@ -165,7 +198,7 @@ int main() {
       }
     }
   }
-  int frames_drawn = 0;
+
   int has_lost = 0;
 
   while (1) {
@@ -222,7 +255,6 @@ int main() {
               }
             }
           }
-          notcurses_render(nc);
         }
       } else if (!(curr->flags & IS_FLAGGED)) {
         curr->flags |= IS_UNCOVERED;
@@ -234,7 +266,6 @@ int main() {
           int x_coord = (nci.x - start_x) / X_MULT;
           x_coord = x_coord * X_MULT + start_x;
           ncplane_printf_yx(ncp, nci.y, x_coord, BOMB);
-          notcurses_render(nc);
         } else if (curr->count == 0) {
           uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
                                     (nci.x - start_x) / X_MULT);
@@ -255,7 +286,6 @@ int main() {
               }
             }
           }
-          notcurses_render(nc);
         } else {
           ncplane_set_bg_default(ncp);
           ncplane_set_fg_rgb(ncp, count_color(curr->count));
@@ -264,41 +294,43 @@ int main() {
           int x_coord = (nci.x - start_x) / X_MULT; // this is field coord
           x_coord = x_coord * X_MULT + start_x;
           ncplane_printf_yx(ncp, nci.y, x_coord, COUNT, curr->count);
-          notcurses_render(nc);
         }
       }
     }
     if (nci.id == NCKEY_BUTTON3 && nci.evtype == NCTYPE_RELEASE) {
+
+      // calculate adjusted x coord
       int x_coord = (nci.x - start_x) / X_MULT;
       x_coord = x_coord * X_MULT + start_x;
+
       if ((nci.y + x_coord) % 2) {
         ncplane_set_bg_rgb(ncp, LIGHT_TILE);
       } else {
         ncplane_set_bg_rgb(ncp, DARK_TILE);
       }
 
-      if (!(curr->flags & IS_UNCOVERED) && !(curr->flags & IS_FLAGGED)) {
+      if (!(curr->flags & (IS_UNCOVERED | IS_FLAGGED))) {
+        // toggle on flag
         flags++;
         curr->flags ^= IS_FLAGGED;
         ncplane_set_fg_rgb(ncp, BLACK);
         // need to find out if this x+y is even or odd to color square
         ncplane_putstr_yx(ncp, nci.y, x_coord, FLAG);
       } else if (curr->flags & IS_FLAGGED) {
+        // toggle off flag
         flags--;
         curr->flags ^= IS_FLAGGED;
         ncplane_putstr_yx(ncp, nci.y, x_coord, BLANK);
       }
       ncplane_set_bg_default(ncp);
       ncplane_set_fg_rgb(ncp, GREY);
-      // string is max 19 chars, possibly only 18
       ncplane_erase_region(ncp, start_y - 1, start_x, -1, COLS);
       ncplane_printf_yx(ncp, start_y - 1, start_x, "Remaining mines: %d",
                         mines - flags);
-      notcurses_render(nc);
     }
     if (has_lost) {
       // TODO: Prompt the user if they want to play again!
-      // basically just reinitialize the game and start over loop
+      // basically just reinitialize the game and start over loop?
 
       ncplane_set_fg_rgb(ncp, RED);
       ncplane_set_bg_default(ncp);
