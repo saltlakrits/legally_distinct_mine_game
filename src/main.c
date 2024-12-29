@@ -186,12 +186,17 @@ int main() {
     }
 
     if (nci.id == NCKEY_BUTTON1 && nci.evtype == NCTYPE_RELEASE) {
+
+      // if tile is already uncovered, we want to check if there are
+      // at least as many flags surrounding the tile as the number
+      // of surrounding mines
       if (curr->flags & IS_UNCOVERED) {
         if (count_surrounding_flags(field, lines, cols, nci.y - start_y,
                                     (nci.x - start_x) / X_MULT)) {
 
           uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
                                     (nci.x - start_x) / X_MULT);
+
           struct tile *inner_curr;
           for (int y = 0; y < lines; y++) {
             for (int x = 0; x < cols; x++) {
@@ -209,16 +214,15 @@ int main() {
                   if (inner_curr->count != 0) {
                     ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x,
                                       COUNT, inner_curr->count);
-                    notcurses_render(nc);
                   } else {
                     ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x,
                                       BLANK);
-                    notcurses_render(nc);
                   }
                 }
               }
             }
           }
+          notcurses_render(nc);
         }
       } else if (!(curr->flags & IS_FLAGGED)) {
         curr->flags |= IS_UNCOVERED;
@@ -244,15 +248,14 @@ int main() {
                 if (inner_curr->count != 0) {
                   ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x,
                                     COUNT, inner_curr->count);
-                  notcurses_render(nc);
                 } else {
                   ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x,
                                     BLANK);
-                  notcurses_render(nc);
                 }
               }
             }
           }
+          notcurses_render(nc);
         } else {
           ncplane_set_bg_default(ncp);
           ncplane_set_fg_rgb(ncp, count_color(curr->count));
@@ -309,19 +312,24 @@ int main() {
       notcurses_stop(nc);
       return 0;
     }
-    if (has_won(field, lines, cols)) {
-      // TODO: Prompt the user if they want to play again!
-      ncplane_set_fg_rgb(ncp, PURPLE);
-      ncplane_set_bg_default(ncp);
-      ncplane_erase_region(ncp, start_y - 1, start_x, -1, COLS);
-      ncplane_putstr_yx(ncp, start_y - 1, start_x, "You won! Time: NYINYI");
-      notcurses_render(nc);
+    if (nci.evtype == NCTYPE_RELEASE) {
+      // only check if we won on key release, to avoid running it twice
+      // per keypress
+      // things only change on key release anyway!
+      if (has_won(field, lines, cols)) {
+        // TODO: Prompt the user if they want to play again!
+        ncplane_set_fg_rgb(ncp, PURPLE);
+        ncplane_set_bg_default(ncp);
+        ncplane_erase_region(ncp, start_y - 1, start_x, -1, COLS);
+        ncplane_putstr_yx(ncp, start_y - 1, start_x, "You won! Time: NYINYI");
+        notcurses_render(nc);
 
-      notcurses_get_blocking(nc, NULL);
-      notcurses_get_blocking(nc, NULL);
+        notcurses_get_blocking(nc, NULL);
+        notcurses_get_blocking(nc, NULL);
 
-      notcurses_stop(nc);
-      return 0;
+        notcurses_stop(nc);
+        return 0;
+      }
     }
   }
   // should never get here
