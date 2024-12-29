@@ -6,7 +6,7 @@ SRCDIR = src/
 CFILES = $(wildcard $(SRCDIR)*.c)
 OBJS = $(CFILES:.c=.o)
 
-LDLIBS = -lnotcurses -lnotcurses-core -lm -lpthread
+LDLIBS = -lnotcurses -lnotcurses-core
 #@mkdir -p .obj
 
 
