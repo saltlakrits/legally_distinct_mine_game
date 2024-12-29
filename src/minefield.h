@@ -15,19 +15,19 @@ struct tile {
 // whenever we easily want to pass some coords,
 // use this
 struct point {
-	int x;
-	int y;
+  int x;
+  int y;
 };
 
 // we constantly pass around these variables, so let's keep
 // them together
-struct dims {
-	const unsigned LINES;
-	const unsigned COLS;
-	int lines;
-	int cols;
-	int start_y;
-	int start_x;
+struct dimensions {
+  unsigned LINES;
+  unsigned COLS;
+  int lines;
+  int cols;
+  int start_y;
+  int start_x;
 };
 
 // don't call directly
@@ -37,10 +37,9 @@ void *new_minefield(int lines, int cols, int starty, int startx);
 #define NEW_MINEFIELD(LINES, COLS, STARTY, STARTX)                             \
   ((struct tile(*)[LINES][COLS])new_minefield(LINES, COLS, STARTY, STARTX))
 
-void uncover_surrounding_tiles(void *field, int lines, int cols, int y_coord,
-                               int x_coord);
-int count_surrounding_flags(void *field, int lines, int cols, int y_coord,
-                            int x_coord);
-int has_won(void *field, int lines, int cols);
-void print_grid(struct ncplane *ncp, void *field, int *has_lost, int lines,
-                int cols, int start_y, int start_x);
+void uncover_surrounding_tiles(void *field, struct point pnt,
+                               struct dimensions d);
+int count_surrounding_flags(void *field, struct point pnt, struct dimensions d);
+int has_won(void *field, struct dimensions d);
+void print_grid(struct ncplane *ncp, void *field, int *has_lost,
+                struct dimensions d);
