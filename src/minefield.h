@@ -23,3 +23,4 @@ void uncover_surrounding_tiles(void *field, int lines, int cols, int y_coord,
                                int x_coord);
 int count_surrounding_flags(void *field, int lines, int cols, int y_coord,
                             int x_coord);
+int has_won(void *field, int lines, int cols);
