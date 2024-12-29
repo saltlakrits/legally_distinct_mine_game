@@ -92,7 +92,8 @@ void uncover_surrounding_tiles(void *field, int lines, int cols, int y_coord,
       curr = &(*local_field)[y_mod][x_mod];
     }
 
-    if (!(curr->flags & IS_UNCOVERED) && !(curr->flags & IS_FLAGGED)) {
+    // if (!(curr->flags & IS_UNCOVERED) && !(curr->flags & IS_FLAGGED)) {
+    if (!(curr->flags & (IS_UNCOVERED | IS_FLAGGED))) {
       // uncover it, if count in it is 0 -> call this function on that tile too
       // if bomb -> lose, maybe return non-zero for lost?
       // and return 0 if no bomb uncovered
@@ -124,9 +125,12 @@ int count_surrounding_flags(void *field, int lines, int cols, int y_coord,
     }
 		if (curr->flags & IS_FLAGGED) {
 			count++;
+			if (count == expected) {
+				return 1;
+			}
 		}
   }
-  return (expected == count);
+	return 0;
 }
 
 int has_won(void *field, int lines, int cols) {
