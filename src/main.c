@@ -6,22 +6,29 @@
 #include "minefield.h"
 
 #define X_MULT 3
-#define Y_MULT 2
+#define Y_MULT 1
 
 #define MIN(A, B) ((A < B) ? A : B)
 
 #define RED 0xff6b6b
 #define PURPLE 0x8838ef
+#define LIGHT_PURPLE 0x9a4efc
+#define BLACK 0x000000
+#define ALARM 0xff3f2e
+
+#define BLANK "   "
+#define COUNT " %d "
+#define BOMB " \u25CF "
+#define FLAG " \U0001F3F2 "
+
+#define DEBUG
 
 // TODO:
-// * Solve the lopsided grid?
-// * The field is too wide
-// * When uncovering a 0, it should not be written out,
-// 	 and it should uncover all surrounding tiles (and that
-// 	 should propagate to new 0s)
-// * Win condition when all mines are flagged
+// * Solve the lopsided grid? Full width characters??
+// * Win condition when all mines are flagged and rest uncovered
 // * First click should give a bigger area (at least 3x3 tiles)
 //   to work with
+// * NOTE: nci.x / 3 OR nci.x % 3..?????
 
 int main() {
   // seed the rng
@@ -43,7 +50,6 @@ int main() {
 
   // 0x8839ef for covered tiles == rgb(136, 57, 239)
 
-
   ncplane_erase(ncp);
 
   // drawing constraints
@@ -52,17 +58,57 @@ int main() {
   int lines = 10;
   int cols = 10;
   int start_y = (LINES - lines) / 2;
-  int start_x = (COLS - cols) / 2;
+  int start_x = (COLS - cols * X_MULT) / 2;
 
   for (int y = 0; y < lines; y++) {
     for (int x = 0; x < cols; x++) {
-      ncplane_set_bg_rgb(ncp, PURPLE);
-      ncplane_putstr_yx(ncp, y + start_y, x + start_x, " ");
+      if ((x + y) % 2) {
+        ncplane_set_bg_rgb(ncp, LIGHT_PURPLE);
+      } else {
+        ncplane_set_bg_rgb(ncp, PURPLE);
+      }
+      ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
     }
   }
   ncplane_set_fg_rgb(ncp, PURPLE);
   ncplane_set_bg_default(ncp);
   ncplane_putstr_yx(ncp, 0, 0, "To start, click a tile on the field!");
+  notcurses_render(nc);
+
+#ifdef DEBUG
+  ncplane_set_fg_rgb(ncp, 0x000000);
+  // if (x + y) % 2 == 0 make covered tile PURPLE
+  // else make covered tile LIGHT_PURPLE
+  ncplane_set_bg_rgb(ncp, PURPLE);
+  ncplane_putstr_yx(ncp, 23, 0, "   ");
+  ncplane_set_bg_rgb(ncp, LIGHT_PURPLE);
+  ncplane_putstr_yx(ncp, 23, 3, "   ");
+  ncplane_set_bg_rgb(ncp, PURPLE);
+  ncplane_putstr_yx(ncp, 23, 6, "   ");
+  ncplane_set_bg_rgb(ncp, LIGHT_PURPLE);
+  ncplane_putstr_yx(ncp, 24, 0, "   ");
+  ncplane_set_bg_rgb(ncp, PURPLE);
+  ncplane_putstr_yx(ncp, 24, 3, "   ");
+  ncplane_set_bg_rgb(ncp, LIGHT_PURPLE);
+  ncplane_set_fg_rgb(ncp, BLACK);
+  ncplane_putstr_yx(ncp, 24, 6, "   ");
+  ncplane_set_bg_rgb(ncp, PURPLE);
+  ncplane_putstr_yx(ncp, 25, 0, " \U0001F3F2 ");
+  ncplane_set_bg_rgb(ncp, LIGHT_PURPLE);
+  ncplane_putstr_yx(ncp, 25, 3, " \U0001F3F2 "); // hollow bomb
+  ncplane_set_bg_rgb(ncp, PURPLE);
+  ncplane_putstr_yx(ncp, 25, 6, "   "); // hollow flag
+  ncplane_set_fg_rgb(ncp, LIGHT_PURPLE);
+  ncplane_set_bg_default(ncp);
+  ncplane_putstr_yx(ncp, 26, 0, " 3 ");
+  ncplane_set_bg_default(ncp);
+  ncplane_set_fg_rgb(ncp, RED);
+  ncplane_putstr_yx(ncp, 26, 3, " \u25CF "); // solid bomb
+  ncplane_set_bg_rgb(ncp, LIGHT_PURPLE);
+  ncplane_set_fg_rgb(ncp, BLACK);
+  ncplane_putstr_yx(ncp, 26, 6, "   "); // solid flag
+#endif
+
   notcurses_render(nc);
 
   // current tile, for easier access when looping through field
@@ -72,7 +118,7 @@ int main() {
   while (1) {
     notcurses_get_blocking(nc, &nci);
     if (nci.y < start_y || nci.y > start_y + lines || nci.x < start_x ||
-        nci.x > start_x + cols) {
+        nci.x > start_x + cols * X_MULT) {
       continue;
     }
     if (nci.evtype == NCTYPE_RELEASE) {
@@ -80,12 +126,20 @@ int main() {
     }
   }
   struct tile(*field)[lines][cols] =
-      NEW_MINEFIELD(lines, cols, nci.y - start_y, nci.x - start_y);
-  curr = &(*field)[nci.y - start_y][nci.x - start_x];
+      NEW_MINEFIELD(lines, cols, nci.y - start_y, (nci.x - start_x) / X_MULT);
+
+#ifdef DEBUG
+  ncplane_set_bg_default(ncp);
+  ncplane_set_fg_rgb(ncp, 0xffffff);
+  ncplane_printf_yx(ncp, 2, 0, "nci.x: %d, cols: %d, start_x: %d", nci.x, cols,
+                    start_x);
+
+#endif
+  curr = &(*field)[nci.y - start_y][(nci.x - start_x) / X_MULT];
   curr->flags |= IS_UNCOVERED;
   if (curr->count == 0) {
     uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
-                              nci.x - start_x);
+                              (nci.x - start_x) / X_MULT);
   }
   // recall the .flags are IS_BOMB, IS_FLAGGED, IS_UNCOVERED
   uint8_t mines = lines * cols * 0.2;
@@ -96,12 +150,21 @@ int main() {
     for (int x = 0; x < cols; x++) {
       curr = &(*field)[y][x];
       if (curr->flags & IS_UNCOVERED) {
-				ncplane_set_fg_rgb(ncp, PURPLE);
+        ncplane_set_fg_rgb(ncp, PURPLE);
         ncplane_set_bg_default(ncp);
-        ncplane_printf_yx(ncp, y + start_y, x + start_x, "%d", curr->count);
+        if (curr->count) {
+          ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x, COUNT,
+                            curr->count);
+        } else {
+          ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
+        }
       } else {
-        ncplane_set_bg_rgb(ncp, PURPLE);
-        ncplane_putstr_yx(ncp, y + start_y, x + start_x, " ");
+        if ((x + y) % 2) {
+          ncplane_set_bg_rgb(ncp, LIGHT_PURPLE);
+        } else {
+          ncplane_set_bg_rgb(ncp, PURPLE);
+        }
+        ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
       }
     }
   }
@@ -127,20 +190,20 @@ int main() {
     }
 
     if (nci.y < start_y || nci.y >= start_y + lines || nci.x < start_x ||
-        nci.x >= start_x + cols) {
+        nci.x >= start_x + cols * X_MULT) {
       continue;
     } else {
       // we grab the tile as the current one to handle, just for ergonomics
-      curr = &(*field)[nci.y - start_y][nci.x - start_x];
+      curr = &(*field)[nci.y - start_y][(nci.x - start_x) / X_MULT];
     }
 
     if (nci.id == NCKEY_BUTTON1 && nci.evtype == NCTYPE_RELEASE) {
       if (curr->flags & IS_UNCOVERED) {
         if (count_surrounding_flags(field, lines, cols, nci.y - start_y,
-                                    nci.x - start_x)) {
+                                    (nci.x - start_x) / X_MULT)) {
 
           uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
-                                    nci.x - start_x);
+                                    (nci.x - start_x) / X_MULT);
           struct tile *inner_curr;
           for (int y = 0; y < lines; y++) {
             for (int x = 0; x < cols; x++) {
@@ -150,16 +213,18 @@ int main() {
                   has_lost = 1;
                   ncplane_set_fg_rgb(ncp, RED);
                   ncplane_set_bg_default(ncp);
-                  ncplane_printf_yx(ncp, y + start_y, x + start_x, "B");
+                  ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x,
+                                    BOMB);
                 } else {
                   ncplane_set_fg_rgb(ncp, PURPLE);
                   ncplane_set_bg_default(ncp);
                   if (inner_curr->count != 0) {
-                    ncplane_printf_yx(ncp, y + start_y, x + start_x, "%d",
-                                      inner_curr->count);
+                    ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x,
+                                      COUNT, inner_curr->count);
                     notcurses_render(nc);
                   } else {
-                    ncplane_putstr_yx(ncp, y + start_y, x + start_x, " ");
+                    ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x,
+                                      BLANK);
                     notcurses_render(nc);
                   }
                 }
@@ -174,27 +239,29 @@ int main() {
                                      // surrounding, this should propagate!
         if (curr->flags & IS_BOMB) {
           has_lost = 1;
-          ncplane_set_fg_rgb8(ncp, 255, 107, 107);
+          ncplane_set_fg_rgb(ncp, RED);
           ncplane_set_bg_default(ncp);
-          // TODO: Try fullwidth B
-          ncplane_printf_yx(ncp, nci.y, nci.x, "B");
+					int x_coord = (nci.x - start_x) / X_MULT;
+					x_coord = x_coord * X_MULT + start_x;
+          ncplane_printf_yx(ncp, nci.y, x_coord, BOMB);
           notcurses_render(nc);
         } else if (curr->count == 0) {
           uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
-                                    nci.x - start_x);
+                                    (nci.x - start_x) / X_MULT);
           struct tile *inner_curr;
           for (int y = 0; y < lines; y++) {
             for (int x = 0; x < cols; x++) {
               inner_curr = &(*field)[y][x];
               if (inner_curr->flags & IS_UNCOVERED) {
-                ncplane_set_fg_rgb8(ncp, 136, 56, 239);
+                ncplane_set_fg_rgb(ncp, PURPLE);
                 ncplane_set_bg_default(ncp);
                 if (inner_curr->count != 0) {
-                  ncplane_printf_yx(ncp, y + start_y, x + start_x, "%d",
-                                    inner_curr->count);
+                  ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x,
+                                    COUNT, inner_curr->count);
                   notcurses_render(nc);
                 } else {
-                  ncplane_putstr_yx(ncp, y + start_y, x + start_x, " ");
+                  ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x,
+                                    BLANK);
                   notcurses_render(nc);
                 }
               }
@@ -202,25 +269,35 @@ int main() {
           }
         } else {
           ncplane_set_bg_default(ncp);
-          ncplane_set_fg_rgb8(ncp, 136, 56, 239);
+          ncplane_set_fg_rgb(ncp, PURPLE);
           // TODO: set foreground color according to count
-          // TODO: try using fullwidth numbers and using 2 cols for each tile
-          ncplane_printf_yx(ncp, nci.y, nci.x, "%d", curr->count);
+          // the following looks really stupid (and probably is), but
+          // we rely on the integer division in the first calculation
+          int x_coord = (nci.x - start_x) / X_MULT; // this is field coord
+          x_coord = x_coord * X_MULT + start_x;
+          ncplane_printf_yx(ncp, nci.y, x_coord, COUNT, curr->count);
           notcurses_render(nc);
         }
       }
     }
     if (nci.id == NCKEY_BUTTON3 && nci.evtype == NCTYPE_RELEASE) {
+      int x_coord = (nci.x - start_x) / X_MULT;
+      x_coord = x_coord * X_MULT + start_x;
+      if ((nci.y + x_coord) % 2) {
+        ncplane_set_bg_rgb(ncp, LIGHT_PURPLE);
+      } else {
+        ncplane_set_bg_rgb(ncp, PURPLE);
+      }
+
       if (!(curr->flags & IS_UNCOVERED) && !(curr->flags & IS_FLAGGED)) {
         curr->flags ^= IS_FLAGGED;
-        ncplane_set_fg_rgb8(ncp, 255, 107, 107);
-        ncplane_set_bg_rgb8(ncp, 136, 56, 239);
-        ncplane_putstr_yx(ncp, nci.y, nci.x, "F");
+        ncplane_set_fg_rgb(ncp, BLACK);
+        // need to find out if this x+y is even or odd to color square
+        ncplane_putstr_yx(ncp, nci.y, x_coord, FLAG);
         notcurses_render(nc);
       } else if (curr->flags & IS_FLAGGED) {
         curr->flags ^= IS_FLAGGED;
-        ncplane_set_bg_rgb8(ncp, 136, 56, 239);
-        ncplane_putstr_yx(ncp, nci.y, nci.x, " ");
+        ncplane_putstr_yx(ncp, nci.y, x_coord, BLANK);
         notcurses_render(nc);
       }
     }
