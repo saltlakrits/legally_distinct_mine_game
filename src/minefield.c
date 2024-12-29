@@ -147,6 +147,3 @@ int has_won(void *field, int lines, int cols) {
 	}
 	return 1;
 }
-
-void *initialize() {
-}
