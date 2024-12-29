@@ -128,3 +128,19 @@ int count_surrounding_flags(void *field, int lines, int cols, int y_coord,
   }
   return (expected == count);
 }
+
+int has_won(void *field, int lines, int cols) {
+	struct tile (*local_field)[lines][cols] = field;
+
+	struct tile *curr;
+	for (int y = 0; y < lines; y++) {
+		for (int x = 0; x < cols; x++) {
+			curr = &(*local_field)[y][x];
+
+			if (!(curr->flags & IS_BOMB) && !(curr->flags & IS_UNCOVERED)) {
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
