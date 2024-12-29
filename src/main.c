@@ -3,231 +3,21 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "init.h"
 #include "minefield.h"
-
-#define X_MULT 3
-#define Y_MULT 1
+#include "options.h"
 
 #define MAX(A, B) ((A > B) ? A : B)
 #define MIN(A, B) ((A < B) ? A : B)
-
-#define LIGHT_MODE 0
-
-#ifndef LIGHT_MODE
-#define LIGHT_MODE 0
-#endif
-
-#if LIGHT_MODE == 1
-#define GREY 0x404040
-#define GREEN 0x47d147
-#define PURPLE 0x8838ef
-#define BLACK 0x000000
-
-#define LIGHT_TILE 0xe6e6e6
-#define DARK_TILE 0xcccccc
-
-#define PROMPT_BG LIGHT_TILE
-#else
-#define GREY 0xe6e6e6
-#define GREEN 0x7fff78
-#define PURPLE 0x9a4efc
-#define BLACK 0xe6e6e6
-
-#define LIGHT_TILE 0x595959
-#define DARK_TILE 0x404040
-
-#define PROMPT_BG 0x303030
-#endif
-
-#define RED 0xff6b6b
-#define ALARM 0xff3f2e
-#define BLUE 0x00a2ff
-#define ORANGE 0xffae00
-#define LIME 0xb3ff00
-
-#define BLANK "   "
-#define COUNT " %d "
-#define BOMB " \u25CF "
-#define FLAG " \U0001F3F2 "
 
 // TODO:
 // * First click should give a bigger area (at least 3x3 tiles)
 //   to work with
 
-int count_color(uint8_t c) {
-  switch (c) {
-  case 1:
-    return GREY;
-  case 2:
-    return GREEN;
-  case 3:
-    return BLUE;
-  case 4:
-    return PURPLE;
-  case 5:
-    return ORANGE;
-  case 6:
-    return RED;
-  case 7:
-    return ALARM;
-  case 8:
-    return LIME;
-  default:
-    return 0;
-  }
-}
-
-void dummy_field(struct ncplane *ncp, int lines, int cols, int start_y,
-                 int start_x) {
-  // draw initial "dummy" grid
-  for (int y = 0; y < lines; y++) {
-    for (int x = 0; x < cols; x++) {
-      if ((x + y) % 2) {
-        ncplane_set_bg_rgb(ncp, LIGHT_TILE);
-      } else {
-        ncplane_set_bg_rgb(ncp, DARK_TILE);
-      }
-      ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
-    }
-  }
-
-  // print some instructions
-  ncplane_set_fg_rgb(ncp, GREY);
-  ncplane_set_bg_default(ncp);
-  ncplane_putstr_yx(ncp, start_y - 1, start_x,
-                    "To start, click a tile on the field!");
-}
-
-void print_grid(struct ncplane *ncp, void *field, int lines, int cols,
-                int start_y, int start_x) {
-  struct tile(*local_field)[lines][cols] = field;
-  struct tile *curr;
-
-  // draw "actual" (instead of dummy) field now
-  for (int y = 0; y < lines; y++) {
-    for (int x = 0; x < cols; x++) {
-
-      curr = &(*local_field)[y][x];
-      if (curr->flags & IS_UNCOVERED) {
-        ncplane_set_fg_rgb(ncp, count_color(curr->count));
-        ncplane_set_bg_default(ncp);
-        if (curr->count) {
-          ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x, COUNT,
-                            curr->count);
-        } else {
-          ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
-        }
-      } else {
-        // if not uncovered
-        if ((x + y) % 2) {
-          ncplane_set_bg_rgb(ncp, LIGHT_TILE);
-        } else {
-          ncplane_set_bg_rgb(ncp, DARK_TILE);
-        }
-        ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
-      }
-    }
-  }
-}
-
-void get_initial_tile(struct notcurses *nc, struct ncinput *nci, int lines,
-                      int cols, int start_y, int start_x) {
-  while (1) {
-    notcurses_get_blocking(nc, nci);
-    if (nci->id == 'q' || nci->id == 'Q' || nci->id == NCKEY_ESC) {
-      break;
-    }
-    if (nci->y < start_y || nci->y > start_y + lines || nci->x < start_x ||
-        nci->x > start_x + cols * X_MULT) {
-      continue;
-    }
-    if (nci->evtype == NCTYPE_RELEASE) {
-      break;
-    }
-  }
-}
-
-int prompt_reinit(struct notcurses *nc, struct ncplane *ncp,
-                  struct ncinput *nci, int lines, int cols, int start_y,
-                  int start_x) {
-  // prompt the user if they want to play again
-
-  ncplane_set_fg_rgb(ncp, GREY);
-  ncplane_set_bg_rgb(ncp, PROMPT_BG);
-
-  char *bg_string = malloc((cols * 3 - 2) * sizeof *bg_string);
-  memset(bg_string, ' ', cols * 3 - 2);
-
-  ncplane_putstr_yx(ncp, start_y + 1, start_x + 1, bg_string);
-  ncplane_putstr_yx(ncp, start_y + 2, start_x + 1, bg_string);
-  ncplane_putstr_yx(ncp, start_y + 3, start_x + 1, bg_string);
-  ncplane_putstr_yx(ncp, start_y + 4, start_x + 1, bg_string);
-  ncplane_putstr_yx(ncp, start_y + 5, start_x + 1, bg_string);
-
-  ncplane_printf_yx(ncp, start_y + 2, start_x + cols * 3 * 0.5 - 5,
-                    "Play again?");
-
-  ncplane_set_bg_rgb(ncp, DARK_TILE);
-  int offset = 2;
-
-  int yes_start = (start_x + cols * 3 * 0.25) - offset;
-  int yes_end = yes_start + 3 + offset * 2;
-  int no_start = (start_x + cols * 3 * 0.75) - offset;
-  int no_end = no_start + 2 + offset * 2;
-
-  ncplane_printf_yx(ncp, start_y + 4, yes_start, "  Yes  ");
-  ncplane_printf_yx(ncp, start_y + 4, no_start, "  No  ");
-
-  notcurses_render(nc);
-
-  notcurses_mice_enable(nc, NCMICE_MOVE_EVENT | NCMICE_BUTTON_EVENT);
-  // user input loop
-  while (1) {
-    notcurses_get_blocking(nc, nci);
-    if (nci->y == start_y + 4 && nci->x >= yes_start && nci->x <= yes_end) {
-      ncplane_set_fg_rgb(ncp, 0x202020);
-      ncplane_set_bg_rgb(ncp, BLUE);
-      ncplane_printf_yx(ncp, start_y + 4, yes_start, "  Yes  ");
-
-      ncplane_set_fg_rgb(ncp, GREY);
-      ncplane_set_bg_rgb(ncp, DARK_TILE);
-      ncplane_printf_yx(ncp, start_y + 4, no_start, "  No  ");
-    } else if (nci->y == start_y + 4 && nci->x >= no_start &&
-               nci->x <= no_end) {
-      ncplane_set_fg_rgb(ncp, GREY);
-      ncplane_set_bg_rgb(ncp, DARK_TILE);
-      ncplane_printf_yx(ncp, start_y + 4, yes_start, "  Yes  ");
-
-      ncplane_set_fg_rgb(ncp, 0x202020);
-      ncplane_set_bg_rgb(ncp, BLUE);
-      ncplane_printf_yx(ncp, start_y + 4, no_start, "  No  ");
-    } else {
-      ncplane_set_fg_rgb(ncp, GREY);
-      ncplane_set_bg_rgb(ncp, DARK_TILE);
-      ncplane_printf_yx(ncp, start_y + 4, yes_start, "  Yes  ");
-      ncplane_printf_yx(ncp, start_y + 4, no_start, "  No  ");
-    }
-    if (nci->id == NCKEY_BUTTON1 && nci->evtype == NCTYPE_RELEASE) {
-      if (nci->y == start_y + 4 && nci->x >= yes_start && nci->x <= yes_end) {
-
-        free(bg_string);
-        notcurses_mice_enable(nc, NCMICE_BUTTON_EVENT);
-        return 1;
-      } else if (nci->y == start_y + 4 && nci->x >= no_start &&
-                 nci->x <= no_end) {
-
-        free(bg_string);
-        notcurses_mice_enable(nc, NCMICE_BUTTON_EVENT);
-        return 0;
-      }
-    }
-    notcurses_render(nc);
-  }
-}
-
 int main(int argc, char *argv[]) {
   // seed the rng
   srand(time(NULL));
+
 
   unsigned LINES, COLS;
 
@@ -320,6 +110,8 @@ int main(int argc, char *argv[]) {
 
   // wait for user to click inside grid
   get_initial_tile(nc, &nci, lines, cols, start_y, start_x);
+
+  // quitting
   if (nci.id == 'q' || nci.id == 'Q' || nci.id == NCKEY_ESC) {
     notcurses_stop(nc);
     return 0;
@@ -348,29 +140,35 @@ int main(int argc, char *argv[]) {
   ncplane_printf_yx(ncp, start_y - 1, start_x, "Remaining mines: %d",
                     mines - flags);
 
-  // draw "actual" (instead of dummy) field now
-  print_grid(ncp, field, lines, cols, start_y, start_x);
-
   int has_lost = 0;
   int reinitialize = 0;
+
+  // draw "actual" (instead of dummy) field now
+  print_grid(ncp, field, &has_lost, lines, cols, start_y, start_x);
 
   while (1) {
     notcurses_render(nc);
 
+    // get input
     notcurses_get_blocking(nc, &nci);
+
+    // quitting
     if (nci.id == 'q' || nci.id == 'Q' || nci.id == NCKEY_ESC) {
       notcurses_stop(nc);
       return 0;
     }
 
+    // if we didn't quit, check that we clicked inside grid
     if (nci.y < start_y || nci.y >= start_y + lines || nci.x < start_x ||
         nci.x >= start_x + cols * X_MULT) {
+      // if not, just get new input
       continue;
     } else {
-      // we grab the tile as the current one to handle, just for ergonomics
+      // else we grab the tile as the current one to handle, just for ergonomics
       curr = &(*field)[nci.y - start_y][(nci.x - start_x) / X_MULT];
     }
 
+    // if mouse1
     if (nci.id == NCKEY_BUTTON1 && nci.evtype == NCTYPE_RELEASE) {
 
       // if tile is already uncovered, we want to check if there are
@@ -383,71 +181,16 @@ int main(int argc, char *argv[]) {
           uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
                                     (nci.x - start_x) / X_MULT);
 
-          struct tile *inner_curr;
-          for (int y = 0; y < lines; y++) {
-            for (int x = 0; x < cols; x++) {
-              inner_curr = &(*field)[y][x];
-              if (inner_curr->flags & IS_UNCOVERED) {
-                if (inner_curr->flags & IS_BOMB) {
-                  has_lost = 1;
-                  ncplane_set_fg_rgb(ncp, ALARM);
-                  ncplane_set_bg_default(ncp);
-                  ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x,
-                                    BOMB);
-                } else {
-                  ncplane_set_fg_rgb(ncp, count_color(inner_curr->count));
-                  ncplane_set_bg_default(ncp);
-                  if (inner_curr->count != 0) {
-                    ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x,
-                                      COUNT, inner_curr->count);
-                  } else {
-                    ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x,
-                                      BLANK);
-                  }
-                }
-              }
-            }
-          }
+          print_grid(ncp, field, &has_lost, lines, cols, start_y, start_x);
         }
       } else if (!(curr->flags & IS_FLAGGED)) {
+        // make uncovered
         curr->flags |= IS_UNCOVERED;
-
-        if (curr->flags & IS_BOMB) {
-          has_lost = 1;
-          ncplane_set_fg_rgb(ncp, ALARM);
-          ncplane_set_bg_default(ncp);
-          int x_coord = (nci.x - start_x) / X_MULT;
-          x_coord = x_coord * X_MULT + start_x;
-          ncplane_printf_yx(ncp, nci.y, x_coord, BOMB);
-        } else if (curr->count == 0) {
+        if (!(curr->flags & IS_BOMB) && curr->count == 0) {
           uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
                                     (nci.x - start_x) / X_MULT);
-          struct tile *inner_curr;
-          for (int y = 0; y < lines; y++) {
-            for (int x = 0; x < cols; x++) {
-              inner_curr = &(*field)[y][x];
-              if (inner_curr->flags & IS_UNCOVERED) {
-                ncplane_set_fg_rgb(ncp, count_color(inner_curr->count));
-                ncplane_set_bg_default(ncp);
-                if (inner_curr->count != 0) {
-                  ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x,
-                                    COUNT, inner_curr->count);
-                } else {
-                  ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x,
-                                    BLANK);
-                }
-              }
-            }
-          }
-        } else {
-          ncplane_set_bg_default(ncp);
-          ncplane_set_fg_rgb(ncp, count_color(curr->count));
-          // the following looks really stupid (and probably is), but
-          // we rely on the integer division in the first calculation
-          int x_coord = (nci.x - start_x) / X_MULT; // this is field coord
-          x_coord = x_coord * X_MULT + start_x;
-          ncplane_printf_yx(ncp, nci.y, x_coord, COUNT, curr->count);
         }
+        print_grid(ncp, field, &has_lost, lines, cols, start_y, start_x);
       }
     }
     if (nci.id == NCKEY_BUTTON3 && nci.evtype == NCTYPE_RELEASE) {
@@ -540,6 +283,8 @@ int main(int argc, char *argv[]) {
 
       // wait for user to click inside grid
       get_initial_tile(nc, &nci, lines, cols, start_y, start_x);
+
+      // quitting
       if (nci.id == 'q' || nci.id == 'Q' || nci.id == NCKEY_ESC) {
         notcurses_stop(nc);
         return 0;
@@ -564,7 +309,8 @@ int main(int argc, char *argv[]) {
       ncplane_printf_yx(ncp, start_y - 1, start_x, "Remaining mines: %d",
                         mines - flags);
 
-      print_grid(ncp, field, lines, cols, start_y, start_x);
+      // draw "actual" (instead of dummy) field now
+      print_grid(ncp, field, &has_lost, lines, cols, start_y, start_x);
 
       has_lost = 0;
       reinitialize = 0;
