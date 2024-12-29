@@ -1,4 +1,3 @@
-#include <notcurses/nckeys.h>
 #include <notcurses/notcurses.h>
 #include <stdint.h>
 #include <time.h>
@@ -13,19 +12,23 @@
 // TODO:
 // * First click should give a bigger area (at least 3x3 tiles)
 //   to work with
+// * Flash surrounding unflagged if there aren't enough surrounding
+// 	 flags
+// * Time counter & print out time when player wins
+// * Maybe save personal best to a file?
 
 int main(int argc, char *argv[]) {
   // seed the rng
   srand(time(NULL));
 
-
-  unsigned LINES, COLS;
+  struct dimensions dims;
 
   struct notcurses_options nco = {.flags = NCOPTION_SUPPRESS_BANNERS};
   struct notcurses *nc = notcurses_init(&nco, NULL);
-  struct ncplane *ncp = notcurses_stddim_yx(nc, &LINES, &COLS);
+  struct ncplane *ncp = notcurses_stddim_yx(nc, &dims.LINES, &dims.COLS);
   struct ncinput nci;
 
+	// Process CLI args
   if (argc > 3) {
     notcurses_stop(nc);
     printf("\nUnrecognized argument count.\n");
@@ -36,7 +39,6 @@ int main(int argc, char *argv[]) {
     printf("\t-m: makes the grid as large as possible for the terminal\n\n");
     return 1;
   }
-  int lines, cols;
 
   for (int i = 0; i < argc; i++) {
     if (strcmp(argv[i], "-h") == 0) {
@@ -52,8 +54,8 @@ int main(int argc, char *argv[]) {
   }
 
   if (argc == 2 && strcmp(argv[1], "-m") == 0) {
-    lines = LINES - 3;
-    cols = COLS / 3;
+    dims.lines = dims.LINES - 3;
+    dims.cols = dims.COLS / 3;
   } else {
     switch (argc) {
     case 1:
@@ -61,8 +63,8 @@ int main(int argc, char *argv[]) {
 
       // drawing constraints
       // lines and cols should be set by user but have a default
-      lines = LINES / 2;
-      cols = COLS * 0.2;
+      dims.lines = dims.LINES / 2;
+      dims.cols = dims.COLS * 0.2;
       break;
     case 2:
       // NOTE: if arg can't be read as an int, it will default to 10,
@@ -70,46 +72,46 @@ int main(int argc, char *argv[]) {
 
       // one arg (grid should be arg x arg)
 
-      lines = strtol(argv[1], NULL, 10);
-      lines = (lines >= 10) ? lines : 10;
-      cols = lines;
+      dims.lines = strtol(argv[1], NULL, 10);
+      dims.lines = (dims.lines >= 10) ? dims.lines : 10;
+      dims.cols = dims.lines;
 
       // check bounds
-      lines = (lines <= LINES - 3) ? lines : LINES - 3;
-      cols = (cols <= COLS / 3) ? cols : COLS / 3;
+      dims.lines = (dims.lines <= dims.LINES - 3) ? dims.lines : dims.LINES - 3;
+      dims.cols = (dims.cols <= dims.COLS / 3) ? dims.cols : dims.COLS / 3;
       break;
     case 3:
       // two args (grid should be arg1 x arg2)
 
-      lines = strtol(argv[1], NULL, 10);
-      cols = strtol(argv[2], NULL, 10);
+      dims.lines = strtol(argv[1], NULL, 10);
+      dims.cols = strtol(argv[2], NULL, 10);
 
       // check bounds
-      lines = (lines <= LINES - 3) ? lines : LINES - 3;
-      lines = (lines >= 10) ? lines : 10;
-      cols = (cols <= COLS / 3) ? cols : COLS / 3;
-      cols = (cols >= 10) ? cols : 10;
+      dims.lines = (dims.lines <= dims.LINES - 3) ? dims.lines : dims.LINES - 3;
+      dims.lines = (dims.lines >= 10) ? dims.lines : 10;
+      dims.cols = (dims.cols <= dims.COLS / 3) ? dims.cols : dims.COLS / 3;
+      dims.cols = (dims.cols >= 10) ? dims.cols : 10;
 
       break;
     }
   }
 
-  int start_y = (LINES - lines) / 2;
-  int start_x = (COLS - cols * X_MULT) / 2;
+  dims.start_y = (dims.LINES - dims.lines) / 2;
+  dims.start_x = (dims.COLS - dims.cols * X_MULT) / 2;
 
   // enables mice, the events are OR'd together (-> eventmask)
   notcurses_mice_enable(nc, NCMICE_BUTTON_EVENT);
 
   ncplane_erase(ncp);
 
-  dummy_field(ncp, lines, cols, start_y, start_x);
+  dummy_field(ncp, dims);
   notcurses_render(nc);
 
   // current tile, for easier access when looping through field
   struct tile *curr;
 
   // wait for user to click inside grid
-  get_initial_tile(nc, &nci, lines, cols, start_y, start_x);
+  get_initial_tile(nc, &nci, dims);
 
   // quitting
   if (nci.id == 'q' || nci.id == 'Q' || nci.id == NCKEY_ESC) {
@@ -118,34 +120,39 @@ int main(int argc, char *argv[]) {
   }
 
   // make a minefield
-  struct tile(*field)[lines][cols] =
-      NEW_MINEFIELD(lines, cols, nci.y - start_y, (nci.x - start_x) / X_MULT);
+  struct tile(*field)[dims.lines][dims.cols] =
+      NEW_MINEFIELD(dims.lines, dims.cols, nci.y - dims.start_y,
+                    (nci.x - dims.start_x) / X_MULT);
+
+	// this will be reused to pass various points to functions
+  struct point pnt = {.y = nci.y - dims.start_y,
+                      .x = (nci.x - dims.start_x) / X_MULT};
 
   // process initial click
-  curr = &(*field)[nci.y - start_y][(nci.x - start_x) / X_MULT];
+  curr = &(*field)[nci.y - dims.start_y][(nci.x - dims.start_x) / X_MULT];
   curr->flags |= IS_UNCOVERED;
   if (curr->count == 0) {
-    uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
-                              (nci.x - start_x) / X_MULT);
+    uncover_surrounding_tiles(field, pnt, dims);
   }
 
   // 20% of the tiles of any given grid are mines
-  int mines = lines * cols * 0.2;
+  int mines = dims.lines * dims.cols * 0.2;
   int flags = 0;
 
   // print remaining # of mines
-  ncplane_erase_region(ncp, start_y - 1, 0, -1, COLS);
+  ncplane_erase_region(ncp, dims.start_y - 1, 0, -1, dims.COLS);
   ncplane_set_bg_default(ncp);
   ncplane_set_fg_rgb(ncp, GREY);
-  ncplane_printf_yx(ncp, start_y - 1, start_x, "Remaining mines: %d",
+  ncplane_printf_yx(ncp, dims.start_y - 1, dims.start_x, "Remaining mines: %d",
                     mines - flags);
 
   int has_lost = 0;
   int reinitialize = 0;
 
   // draw "actual" (instead of dummy) field now
-  print_grid(ncp, field, &has_lost, lines, cols, start_y, start_x);
+  print_grid(ncp, field, &has_lost, dims);
 
+	// MAIN LOOP
   while (1) {
     notcurses_render(nc);
 
@@ -159,55 +166,57 @@ int main(int argc, char *argv[]) {
     }
 
     // if we didn't quit, check that we clicked inside grid
-    if (nci.y < start_y || nci.y >= start_y + lines || nci.x < start_x ||
-        nci.x >= start_x + cols * X_MULT) {
+    if (nci.y < dims.start_y || nci.y >= dims.start_y + dims.lines ||
+        nci.x < dims.start_x || nci.x >= dims.start_x + dims.cols * X_MULT) {
       // if not, just get new input
       continue;
     } else {
       // else we grab the tile as the current one to handle, just for ergonomics
-      curr = &(*field)[nci.y - start_y][(nci.x - start_x) / X_MULT];
+      curr = &(*field)[nci.y - dims.start_y][(nci.x - dims.start_x) / X_MULT];
     }
 
     // if mouse1
     if (nci.id == NCKEY_BUTTON1 && nci.evtype == NCTYPE_RELEASE) {
 
+      // coords easy to pass to functions
+      pnt.y = nci.y - dims.start_y;
+      pnt.x = (nci.x - dims.start_x) / X_MULT;
+
       // if tile is already uncovered, we want to check if there are
       // at least as many flags surrounding the tile as the number
       // of surrounding mines
       if (curr->flags & IS_UNCOVERED) {
-        if (count_surrounding_flags(field, lines, cols, nci.y - start_y,
-                                    (nci.x - start_x) / X_MULT)) {
 
-          uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
-                                    (nci.x - start_x) / X_MULT);
+        if (count_surrounding_flags(field, pnt, dims)) {
 
-          print_grid(ncp, field, &has_lost, lines, cols, start_y, start_x);
+          uncover_surrounding_tiles(field, pnt, dims);
+          print_grid(ncp, field, &has_lost, dims);
         }
       } else if (!(curr->flags & IS_FLAGGED)) {
         // make uncovered
         curr->flags |= IS_UNCOVERED;
         if (!(curr->flags & IS_BOMB) && curr->count == 0) {
-          uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
-                                    (nci.x - start_x) / X_MULT);
+          uncover_surrounding_tiles(field, pnt, dims);
         }
-        print_grid(ncp, field, &has_lost, lines, cols, start_y, start_x);
+        print_grid(ncp, field, &has_lost, dims);
       }
     }
     if (nci.id == NCKEY_BUTTON3 && nci.evtype == NCTYPE_RELEASE) {
 
-      // calculate adjusted x coord
-      int x_coord = (nci.x - start_x) / X_MULT;
-      x_coord = x_coord * X_MULT + start_x;
-      int grid_y = (nci.y - start_y);
+      // field coords for accurately choosing tile color to print
+			int x_coord = (nci.x - dims.start_x) / X_MULT;
+			int y_coord = nci.y - dims.start_y;
 
-      int TILE = (grid_y + x_coord) % 2 ? LIGHT_TILE : DARK_TILE;
+      int TILE = (y_coord + x_coord) % 2 ? LIGHT_TILE : DARK_TILE;
       ncplane_set_bg_rgb(ncp, TILE);
+
+			// calculate actual x coord to print to
+			x_coord = dims.start_x + x_coord * X_MULT;
 
       if (!(curr->flags & (IS_UNCOVERED | IS_FLAGGED))) {
         // toggle on flag
         flags++;
         ncplane_set_fg_rgb(ncp, BLACK);
-        // need to find out if this x+y is even or odd to color square
         ncplane_putstr_yx(ncp, nci.y, x_coord, FLAG);
       } else if (curr->flags & IS_FLAGGED) {
         // toggle off flag
@@ -215,31 +224,27 @@ int main(int argc, char *argv[]) {
         ncplane_putstr_yx(ncp, nci.y, x_coord, BLANK);
       }
 
+			// regardless, the flag on the tile struct should be toggled
       curr->flags ^= IS_FLAGGED;
 
       ncplane_set_bg_default(ncp);
       ncplane_set_fg_rgb(ncp, GREY);
-      ncplane_erase_region(ncp, start_y - 1, start_x, -1, COLS);
-      ncplane_printf_yx(ncp, start_y - 1, start_x, "Remaining mines: %d",
-                        mines - flags);
+      ncplane_erase_region(ncp, dims.start_y - 1, dims.start_x, -1, dims.COLS);
+      ncplane_printf_yx(ncp, dims.start_y - 1, dims.start_x,
+                        "Remaining mines: %d", mines - flags);
     }
 
     if (has_lost) {
-      // TODO: Prompt the user if they want to play again!
-      // basically just reinitialize the game and start over loop?
-
       ncplane_set_fg_rgb(ncp, RED);
       ncplane_set_bg_default(ncp);
-      ncplane_erase_region(ncp, start_y - 1, start_x, -1, COLS);
-      ncplane_putstr_yx(ncp, start_y - 1, start_x, "You lost :(");
+      ncplane_erase_region(ncp, dims.start_y - 1, dims.start_x, -1, dims.COLS);
+      ncplane_putstr_yx(ncp, dims.start_y - 1, dims.start_x, "You lost :(");
       notcurses_render(nc);
 
-      // TODO: check if user wants to play again and set reinitialize if true
       notcurses_get_blocking(nc, NULL);
       notcurses_get_blocking(nc, NULL);
 
-      reinitialize =
-          prompt_reinit(nc, ncp, &nci, lines, cols, start_y, start_x);
+      reinitialize = prompt_reinit(nc, ncp, &nci, dims);
 
       if (!reinitialize) {
         notcurses_stop(nc);
@@ -251,20 +256,19 @@ int main(int argc, char *argv[]) {
       // only check if we won on key release, to avoid running it twice
       // per keypress
       // things only change on key release anyway!
-      if (has_won(field, lines, cols)) {
-        // TODO: Prompt the user if they want to play again!
+      if (has_won(field, dims)) {
         ncplane_set_fg_rgb(ncp, PURPLE);
         ncplane_set_bg_default(ncp);
-        ncplane_erase_region(ncp, start_y - 1, start_x, -1, COLS);
-        ncplane_putstr_yx(ncp, start_y - 1, start_x, "You won! Time: NYINYI");
+        ncplane_erase_region(ncp, dims.start_y - 1, dims.start_x, -1,
+                             dims.COLS);
+        ncplane_putstr_yx(ncp, dims.start_y - 1, dims.start_x,
+                          "You won! Time: NYINYI");
         notcurses_render(nc);
 
-        // TODO: check if user wants to play again and set reinitialize if true
         notcurses_get_blocking(nc, NULL);
         notcurses_get_blocking(nc, NULL);
 
-        reinitialize =
-            prompt_reinit(nc, ncp, &nci, lines, cols, start_y, start_x);
+        reinitialize = prompt_reinit(nc, ncp, &nci, dims);
 
         if (!reinitialize) {
           notcurses_stop(nc);
@@ -277,12 +281,12 @@ int main(int argc, char *argv[]) {
       // erase whole screen and basically repeat initialization from
       // the top
 
-      ncplane_erase_region(ncp, 0, 0, LINES - 1, COLS - 1);
-      dummy_field(ncp, lines, cols, start_y, start_x);
+      ncplane_erase_region(ncp, 0, 0, dims.LINES - 1, dims.COLS - 1);
+      dummy_field(ncp, dims);
       notcurses_render(nc);
 
       // wait for user to click inside grid
-      get_initial_tile(nc, &nci, lines, cols, start_y, start_x);
+      get_initial_tile(nc, &nci, dims);
 
       // quitting
       if (nci.id == 'q' || nci.id == 'Q' || nci.id == NCKEY_ESC) {
@@ -291,26 +295,27 @@ int main(int argc, char *argv[]) {
       }
 
       free(field);
-      field = NEW_MINEFIELD(lines, cols, nci.y - start_y,
-                            (nci.x - start_x) / X_MULT);
+      field = NEW_MINEFIELD(dims.lines, dims.cols, nci.y - dims.start_y,
+                            (nci.x - dims.start_x) / X_MULT);
 
       // process initial click
-      curr = &(*field)[nci.y - start_y][(nci.x - start_x) / X_MULT];
+      curr = &(*field)[nci.y - dims.start_y][(nci.x - dims.start_x) / X_MULT];
       curr->flags |= IS_UNCOVERED;
       if (curr->count == 0) {
-        uncover_surrounding_tiles(field, lines, cols, nci.y - start_y,
-                                  (nci.x - start_x) / X_MULT);
+        pnt.y = nci.y - dims.start_y;
+        pnt.x = (nci.x - dims.start_x) / X_MULT;
+        uncover_surrounding_tiles(field, pnt, dims);
       }
 
       // print remaining # of mines
-      ncplane_erase_region(ncp, start_y - 1, 0, -1, COLS);
+      ncplane_erase_region(ncp, dims.start_y - 1, 0, -1, dims.COLS);
       ncplane_set_bg_default(ncp);
       ncplane_set_fg_rgb(ncp, GREY);
-      ncplane_printf_yx(ncp, start_y - 1, start_x, "Remaining mines: %d",
-                        mines - flags);
+      ncplane_printf_yx(ncp, dims.start_y - 1, dims.start_x,
+                        "Remaining mines: %d", mines - flags);
 
       // draw "actual" (instead of dummy) field now
-      print_grid(ncp, field, &has_lost, lines, cols, start_y, start_x);
+      print_grid(ncp, field, &has_lost, dims);
 
       has_lost = 0;
       reinitialize = 0;

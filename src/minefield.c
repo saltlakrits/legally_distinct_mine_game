@@ -74,9 +74,9 @@ void *new_minefield(int lines, int cols, int starty, int startx) {
   return field;
 }
 
-void uncover_surrounding_tiles(void *field, int lines, int cols, int y_coord,
-                               int x_coord) {
-  struct tile(*local_field)[lines][cols] = field;
+void uncover_surrounding_tiles(void *field, struct point pnt,
+                               struct dimensions d) {
+  struct tile(*local_field)[d.lines][d.cols] = field;
 
   // we want to reveal all surrounding tiles that aren't flagged
   // rel_coords[8][2] helps finding relative coords
@@ -85,10 +85,10 @@ void uncover_surrounding_tiles(void *field, int lines, int cols, int y_coord,
   int y_mod, x_mod;
 
   for (int i = 0; i < 8; i++) {
-    y_mod = y_coord + rel_coords[i][0];
-    x_mod = x_coord + rel_coords[i][1];
+    y_mod = pnt.y + rel_coords[i][0];
+    x_mod = pnt.x + rel_coords[i][1];
 
-    if (y_mod < 0 || y_mod >= lines || x_mod < 0 || x_mod >= cols) {
+    if (y_mod < 0 || y_mod >= d.lines || x_mod < 0 || x_mod >= d.cols) {
       continue;
     } else {
       // set curr to tile we are looking at for readability
@@ -101,25 +101,26 @@ void uncover_surrounding_tiles(void *field, int lines, int cols, int y_coord,
       // and return 0 if no bomb uncovered
       curr->flags ^= IS_UNCOVERED;
       if (curr->count == 0) {
-        uncover_surrounding_tiles(field, lines, cols, y_mod, x_mod);
+        uncover_surrounding_tiles(field, (struct point){.y = y_mod, .x = x_mod},
+                                  d);
       }
     }
   }
 }
 
-int count_surrounding_flags(void *field, int lines, int cols, int y_coord,
-                            int x_coord) {
-  struct tile(*local_field)[lines][cols] = field;
-  int expected = (*local_field)[y_coord][x_coord].count;
+int count_surrounding_flags(void *field, struct point pnt,
+                            struct dimensions d) {
+  struct tile(*local_field)[d.lines][d.cols] = field;
+  int expected = (*local_field)[pnt.y][pnt.x].count;
   int count = 0;
 
   struct tile *curr;
   int y_mod, x_mod;
   for (int i = 0; i < 8; i++) {
-    y_mod = y_coord + rel_coords[i][0];
-    x_mod = x_coord + rel_coords[i][1];
+    y_mod = pnt.y + rel_coords[i][0];
+    x_mod = pnt.x + rel_coords[i][1];
 
-    if (y_mod < 0 || y_mod >= lines || x_mod < 0 || x_mod >= cols) {
+    if (y_mod < 0 || y_mod >= d.lines || x_mod < 0 || x_mod >= d.cols) {
       continue;
     } else {
       // set curr to tile we are looking at for readability
@@ -135,12 +136,12 @@ int count_surrounding_flags(void *field, int lines, int cols, int y_coord,
   return 0;
 }
 
-int has_won(void *field, int lines, int cols) {
-  struct tile(*local_field)[lines][cols] = field;
+int has_won(void *field, struct dimensions d) {
+  struct tile(*local_field)[d.lines][d.cols] = field;
 
   struct tile *curr;
-  for (int y = 0; y < lines; y++) {
-    for (int x = 0; x < cols; x++) {
+  for (int y = 0; y < d.lines; y++) {
+    for (int x = 0; x < d.cols; x++) {
       curr = &(*local_field)[y][x];
 
       if (!(curr->flags & IS_BOMB) && !(curr->flags & IS_UNCOVERED)) {
@@ -151,33 +152,58 @@ int has_won(void *field, int lines, int cols) {
   return 1;
 }
 
-void print_grid(struct ncplane *ncp, void *field, int *has_lost, int lines,
-                 int cols, int start_y, int start_x) {
+void print_grid(struct ncplane *ncp, void *field, int *has_lost,
+                struct dimensions d) {
   // anytime we want to render the entire grid, we run this
 
-	struct tile (*local_field)[lines][cols] = field;
+  struct tile(*local_field)[d.lines][d.cols] = field;
 
-  struct tile *inner_curr;
-  for (int y = 0; y < lines; y++) {
-    for (int x = 0; x < cols; x++) {
-      inner_curr = &(*local_field)[y][x];
-      if (inner_curr->flags & IS_UNCOVERED) {
-        if (inner_curr->flags & IS_BOMB) {
-          *has_lost = 1;
-          ncplane_set_fg_rgb(ncp, ALARM);
-          ncplane_set_bg_default(ncp);
-          ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x, BOMB);
+  struct tile *curr;
+  for (int y = 0; y < d.lines; y++) {
+    for (int x = 0; x < d.cols; x++) {
+      curr = &(*local_field)[y][x];
+      if ((curr->flags & (IS_UNCOVERED | IS_BOMB)) ==
+          (IS_BOMB | IS_UNCOVERED)) {
+        *has_lost = 1;
+        ncplane_set_fg_rgb(ncp, ALARM);
+        ncplane_set_bg_default(ncp);
+        ncplane_printf_yx(ncp, y + d.start_y, x * X_MULT + d.start_x, BOMB);
+      } else if (curr->flags & IS_UNCOVERED) {
+        ncplane_set_fg_rgb(ncp, count_color(curr->count));
+        ncplane_set_bg_default(ncp);
+
+        if (curr->count != 0) {
+          ncplane_printf_yx(ncp, y + d.start_y, x * X_MULT + d.start_x, COUNT,
+                            curr->count);
         } else {
-          ncplane_set_fg_rgb(ncp, count_color(inner_curr->count));
-          ncplane_set_bg_default(ncp);
-          if (inner_curr->count != 0) {
-            ncplane_printf_yx(ncp, y + start_y, x * X_MULT + start_x, COUNT,
-                              inner_curr->count);
-          } else {
-            ncplane_putstr_yx(ncp, y + start_y, x * X_MULT + start_x, BLANK);
-          }
+          ncplane_putstr_yx(ncp, y + d.start_y, x * X_MULT + d.start_x, BLANK);
         }
       }
     }
   }
+  // for (int y = 0; y < d.lines; y++) {
+  //   for (int x = 0; x < d.cols; x++) {
+  //     curr = &(*local_field)[y][x];
+  //     if (curr->flags & IS_UNCOVERED) {
+  //       if (curr->flags & IS_BOMB) {
+  //         *has_lost = 1;
+  //         ncplane_set_fg_rgb(ncp, ALARM);
+  //         ncplane_set_bg_default(ncp);
+  //         ncplane_printf_yx(ncp, y + d.start_y, x * X_MULT + d.start_x,
+  //         BOMB);
+  //       } else {
+  //         ncplane_set_fg_rgb(ncp, count_color(curr->count));
+  //         ncplane_set_bg_default(ncp);
+  //         if (curr->count != 0) {
+  //           ncplane_printf_yx(ncp, y + d.start_y, x * X_MULT + d.start_x,
+  //           COUNT,
+  //                             curr->count);
+  //         } else {
+  //           ncplane_putstr_yx(ncp, y + d.start_y, x * X_MULT + d.start_x,
+  //                             BLANK);
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
 }
