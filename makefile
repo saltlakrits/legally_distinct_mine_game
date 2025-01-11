@@ -1,6 +1,6 @@
 CC=clang
 OUT = mine
-CFLAGS=-Isrc/ -g
+CFLAGS=-Isrc/ -g -O3
 SRCDIR = src/
 #OBJDIR = .obj/
 CFILES = $(wildcard $(SRCDIR)*.c)

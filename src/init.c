@@ -4,6 +4,11 @@
 #include "minefield.h"
 #include "options.h"
 
+typedef enum {
+	grey = 0xe6e6e6,
+} LightColors;
+
+// consider making the colors an enum instead
 int count_color(uint8_t c) {
   switch (c) {
   case 1:

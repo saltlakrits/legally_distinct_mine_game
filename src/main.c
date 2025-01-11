@@ -1,3 +1,4 @@
+#include <bits/time.h>
 #include <notcurses/notcurses.h>
 #include <stdint.h>
 #include <time.h>
@@ -14,7 +15,6 @@
 //   to work with
 // * Flash surrounding unflagged if there aren't enough surrounding
 // 	 flags
-// * Time counter & print out time when player wins
 // * Maybe save personal best to a file?
 
 int main(int argc, char *argv[]) {
@@ -152,6 +152,10 @@ int main(int argc, char *argv[]) {
   // draw "actual" (instead of dummy) field now
   print_grid(ncp, field, &has_lost, dims);
 
+	struct timespec start, win;
+
+	clock_gettime(CLOCK_MONOTONIC, &start);
+
 	// MAIN LOOP
   while (1) {
     notcurses_render(nc);
@@ -201,6 +205,7 @@ int main(int argc, char *argv[]) {
         print_grid(ncp, field, &has_lost, dims);
       }
     }
+		// this is right click
     if (nci.id == NCKEY_BUTTON3 && nci.evtype == NCTYPE_RELEASE) {
 
       // field coords for accurately choosing tile color to print
@@ -257,12 +262,29 @@ int main(int argc, char *argv[]) {
       // per keypress
       // things only change on key release anyway!
       if (has_won(field, dims)) {
+				clock_gettime(CLOCK_MONOTONIC, &win);
+
+				int h, m, s, hundreds, sec_d, ns_d;
+				sec_d = win.tv_sec - start.tv_sec;
+				ns_d = win.tv_nsec - start.tv_nsec;
+				if (ns_d < 0) {
+					ns_d = 1 - ns_d;
+					sec_d--;
+				}
+
+				m = sec_d / 60;
+				s = sec_d % 60;
+				h = m / 60;
+				m = m % 60;
+				hundreds = ns_d / 1e7;
+				// now we have the h:m:s:ms
+
         ncplane_set_fg_rgb(ncp, PURPLE);
         ncplane_set_bg_default(ncp);
         ncplane_erase_region(ncp, dims.start_y - 1, dims.start_x, -1,
                              dims.COLS);
-        ncplane_putstr_yx(ncp, dims.start_y - 1, dims.start_x,
-                          "You won! Time: NYINYI");
+        ncplane_printf_yx(ncp, dims.start_y - 1, dims.start_x,
+                          "You won! Time: %d:%02d:%02d:%02d", h, m, s, hundreds);
         notcurses_render(nc);
 
         notcurses_get_blocking(nc, NULL);
@@ -318,6 +340,7 @@ int main(int argc, char *argv[]) {
       print_grid(ncp, field, &has_lost, dims);
 
       has_lost = 0;
+			flags = 0;
       reinitialize = 0;
     }
   }
